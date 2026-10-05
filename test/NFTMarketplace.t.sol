@@ -17,6 +17,8 @@ contract NFTMarketplaceTest is Test {
     uint256 constant TOKEN_ID = 0;
     uint256 constant PRICE = 1 ether;
 
+    receive() external payable {}
+
     function setUp() public {
         marketplace = new NFTMarketplace();
         nft = new MockNFT();
@@ -47,7 +49,11 @@ contract NFTMarketplaceTest is Test {
 
         nft.approve(address(marketplace), TOKEN_ID);
 
-        marketplace.listNFT(address(nft), TOKEN_ID, PRICE);
+        marketplace.listNFT(
+            address(nft),
+            TOKEN_ID,
+            PRICE
+        );
 
         vm.stopPrank();
 
@@ -55,13 +61,51 @@ contract NFTMarketplaceTest is Test {
 
         vm.prank(buyer);
 
-        marketplace.buyNFT{value: PRICE}(address(nft), TOKEN_ID);
+        marketplace.buyNFT{value: PRICE}(
+            address(nft),
+            TOKEN_ID
+        );
 
-        assertEq(nft.ownerOf(TOKEN_ID), buyer);
+        uint256 expectedFee = 0.025 ether;
+        uint256 expectedSellerProceeds = 0.975 ether;
 
-        assertEq(seller.balance, sellerBalanceBefore + PRICE);
+        // NFT ownership changed
+        assertEq(
+            nft.ownerOf(TOKEN_ID),
+            buyer
+        );
 
-        (,, bool active) = marketplace.listings(address(nft), TOKEN_ID);
+        // Seller has NOT received the ETH yet
+        assertEq(
+            seller.balance,
+            sellerBalanceBefore
+        );
+
+        // Marketplace accounting
+        assertEq(
+            marketplace.proceeds(seller),
+            expectedSellerProceeds
+        );
+
+        assertEq(
+            marketplace.feesAccrued(),
+            expectedFee
+        );
+
+        // The full 1 ETH is physically held by the marketplace
+        assertEq(
+            address(marketplace).balance,
+            PRICE
+        );
+
+        (
+            ,
+            ,
+            bool active
+        ) = marketplace.listings(
+            address(nft),
+            TOKEN_ID
+        );
 
         assertFalse(active);
     }
@@ -240,5 +284,211 @@ contract NFTMarketplaceTest is Test {
         marketplace.updateListingPrice(address(nft), TOKEN_ID, 0);
 
         vm.stopPrank();
+    }
+
+    function testSellerCanWithdrawProceeds() public {
+        vm.startPrank(seller);
+
+        nft.approve(address(marketplace), TOKEN_ID);
+
+        marketplace.listNFT(
+            address(nft),
+            TOKEN_ID,
+            PRICE
+        );
+
+        vm.stopPrank();
+
+        vm.prank(buyer);
+
+        marketplace.buyNFT{value: PRICE}(
+            address(nft),
+            TOKEN_ID
+        );
+
+        uint256 sellerBalanceBefore = seller.balance;
+
+        vm.prank(seller);
+        marketplace.withdrawProceeds();
+
+        assertEq(
+            seller.balance,
+            sellerBalanceBefore + 0.975 ether
+        );
+
+        assertEq(
+            marketplace.proceeds(seller),
+            0
+        );
+
+        assertEq(
+            address(marketplace).balance,
+            0.025 ether
+        );
+    }
+
+    function testOwnerCanWithdrawFees() public {
+        vm.startPrank(seller);
+
+        nft.approve(address(marketplace), TOKEN_ID);
+
+        marketplace.listNFT(
+            address(nft),
+            TOKEN_ID,
+            PRICE
+        );
+
+        vm.stopPrank();
+
+        vm.prank(buyer);
+
+        marketplace.buyNFT{value: PRICE}(
+            address(nft),
+            TOKEN_ID
+        );
+
+        uint256 ownerBalanceBefore = address(this).balance;
+
+        marketplace.withdrawFees();
+
+        assertEq(
+            address(this).balance,
+            ownerBalanceBefore + 0.025 ether
+        );
+
+        assertEq(
+            marketplace.feesAccrued(),
+            0
+        );
+
+        assertEq(
+            address(marketplace).balance,
+            0.975 ether
+        );
+    }
+
+    function testSellerCannotWithdrawProceedsTwice() public {
+        vm.startPrank(seller);
+
+        nft.approve(address(marketplace), TOKEN_ID);
+
+        marketplace.listNFT(
+            address(nft),
+            TOKEN_ID,
+            PRICE
+        );
+
+        vm.stopPrank();
+
+        vm.prank(buyer);
+
+        marketplace.buyNFT{value: PRICE}(
+            address(nft),
+            TOKEN_ID
+        );
+
+        vm.prank(seller);
+        marketplace.withdrawProceeds();
+
+        vm.prank(seller);
+
+        vm.expectRevert(
+            NFTMarketplace.NoProceeds.selector
+        );
+
+        marketplace.withdrawProceeds();
+    }
+
+    function testNonOwnerCannotWithdrawFees() public {
+        vm.prank(buyer);
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "OwnableUnauthorizedAccount(address)",
+                buyer
+            )
+        );
+
+        marketplace.withdrawFees();
+    }
+
+
+    function testAccountingAfterMultipleSales() public {
+        uint256 secondTokenId = 1;
+        uint256 secondPrice = 2 ether;
+
+        address secondBuyer = otherUser;
+
+        nft.mint(seller, secondTokenId);
+
+        vm.deal(secondBuyer, 10 ether);
+
+        vm.startPrank(seller);
+
+        nft.approve(
+            address(marketplace),
+            TOKEN_ID
+        );
+
+        nft.approve(
+            address(marketplace),
+            secondTokenId
+        );
+
+        marketplace.listNFT(
+            address(nft),
+            TOKEN_ID,
+            PRICE
+        );
+
+        marketplace.listNFT(
+            address(nft),
+            secondTokenId,
+            secondPrice
+        );
+
+        vm.stopPrank();
+
+        vm.prank(buyer);
+
+        marketplace.buyNFT{value: PRICE}(
+            address(nft),
+            TOKEN_ID
+        );
+
+        vm.prank(secondBuyer);
+
+        marketplace.buyNFT{value: secondPrice}(
+            address(nft),
+            secondTokenId
+        );
+
+        uint256 expectedFees = 0.075 ether;
+        uint256 expectedProceeds = 2.925 ether;
+
+        assertEq(
+            marketplace.proceeds(seller),
+            expectedProceeds
+        );
+
+        assertEq(
+            marketplace.feesAccrued(),
+            expectedFees
+        );
+
+        assertEq(
+            address(marketplace).balance,
+            3 ether
+        );
+
+        assertEq(
+            nft.ownerOf(TOKEN_ID),
+            buyer
+        );
+
+        assertEq(
+            nft.ownerOf(secondTokenId),
+            secondBuyer
+        );
     }
 }
