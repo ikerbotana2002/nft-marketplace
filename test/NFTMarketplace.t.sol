@@ -504,4 +504,64 @@ contract NFTMarketplaceTest is Test {
 
         assertEq(marketplace.proceeds(address(rejectingSeller)), 0.975 ether);
     }
+
+    function testFuzzPurchaseAccounting(uint96 rawPrice) public {
+        uint256 price = bound(
+            uint256(rawPrice),
+            1,
+            1000 ether
+        );
+
+        vm.startPrank(seller);
+
+        nft.approve(
+            address(marketplace),
+            TOKEN_ID
+        );
+
+        marketplace.listNFT(
+            address(nft),
+            TOKEN_ID,
+            price
+        );
+
+        vm.stopPrank();
+
+        vm.deal(buyer, price);
+
+        vm.prank(buyer);
+
+        marketplace.buyNFT{value: price}(
+            address(nft),
+            TOKEN_ID
+        );
+
+        uint256 expectedFee =
+            (price * marketplace.MARKETPLACE_FEE_BPS()) /
+            marketplace.BPS_DENOMINATOR();
+
+        uint256 expectedSellerProceeds =
+            price - expectedFee;
+
+        assertEq(
+            marketplace.proceeds(seller),
+            expectedSellerProceeds
+        );
+
+        assertEq(
+            marketplace.feesAccrued(),
+            expectedFee
+        );
+
+        assertEq(
+            address(marketplace).balance,
+            price
+        );
+
+        assertEq(
+            marketplace.proceeds(seller) +
+                marketplace.feesAccrued(),
+            price
+        );
+    }
 }
