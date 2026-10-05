@@ -2,9 +2,12 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
-
+import {ReentrantSeller} from "./ReentrantSeller.sol";
 import {NFTMarketplace} from "../src/NFTMarketplace.sol";
 import {MockNFT} from "./MockNFT.sol";
+import {NonERC721Buyer} from "./NonERC721Buyer.sol";
+import {ReentrantBuyer} from "./ReentrantBuyer.sol";
+import {RejectingSeller} from "./RejectingSeller.sol";
 
 contract NFTMarketplaceTest is Test {
     NFTMarketplace marketplace;
@@ -49,11 +52,7 @@ contract NFTMarketplaceTest is Test {
 
         nft.approve(address(marketplace), TOKEN_ID);
 
-        marketplace.listNFT(
-            address(nft),
-            TOKEN_ID,
-            PRICE
-        );
+        marketplace.listNFT(address(nft), TOKEN_ID, PRICE);
 
         vm.stopPrank();
 
@@ -61,51 +60,26 @@ contract NFTMarketplaceTest is Test {
 
         vm.prank(buyer);
 
-        marketplace.buyNFT{value: PRICE}(
-            address(nft),
-            TOKEN_ID
-        );
+        marketplace.buyNFT{value: PRICE}(address(nft), TOKEN_ID);
 
         uint256 expectedFee = 0.025 ether;
         uint256 expectedSellerProceeds = 0.975 ether;
 
         // NFT ownership changed
-        assertEq(
-            nft.ownerOf(TOKEN_ID),
-            buyer
-        );
+        assertEq(nft.ownerOf(TOKEN_ID), buyer);
 
         // Seller has NOT received the ETH yet
-        assertEq(
-            seller.balance,
-            sellerBalanceBefore
-        );
+        assertEq(seller.balance, sellerBalanceBefore);
 
         // Marketplace accounting
-        assertEq(
-            marketplace.proceeds(seller),
-            expectedSellerProceeds
-        );
+        assertEq(marketplace.proceeds(seller), expectedSellerProceeds);
 
-        assertEq(
-            marketplace.feesAccrued(),
-            expectedFee
-        );
+        assertEq(marketplace.feesAccrued(), expectedFee);
 
         // The full 1 ETH is physically held by the marketplace
-        assertEq(
-            address(marketplace).balance,
-            PRICE
-        );
+        assertEq(address(marketplace).balance, PRICE);
 
-        (
-            ,
-            ,
-            bool active
-        ) = marketplace.listings(
-            address(nft),
-            TOKEN_ID
-        );
+        (,, bool active) = marketplace.listings(address(nft), TOKEN_ID);
 
         assertFalse(active);
     }
@@ -291,40 +265,24 @@ contract NFTMarketplaceTest is Test {
 
         nft.approve(address(marketplace), TOKEN_ID);
 
-        marketplace.listNFT(
-            address(nft),
-            TOKEN_ID,
-            PRICE
-        );
+        marketplace.listNFT(address(nft), TOKEN_ID, PRICE);
 
         vm.stopPrank();
 
         vm.prank(buyer);
 
-        marketplace.buyNFT{value: PRICE}(
-            address(nft),
-            TOKEN_ID
-        );
+        marketplace.buyNFT{value: PRICE}(address(nft), TOKEN_ID);
 
         uint256 sellerBalanceBefore = seller.balance;
 
         vm.prank(seller);
         marketplace.withdrawProceeds();
 
-        assertEq(
-            seller.balance,
-            sellerBalanceBefore + 0.975 ether
-        );
+        assertEq(seller.balance, sellerBalanceBefore + 0.975 ether);
 
-        assertEq(
-            marketplace.proceeds(seller),
-            0
-        );
+        assertEq(marketplace.proceeds(seller), 0);
 
-        assertEq(
-            address(marketplace).balance,
-            0.025 ether
-        );
+        assertEq(address(marketplace).balance, 0.025 ether);
     }
 
     function testOwnerCanWithdrawFees() public {
@@ -332,39 +290,23 @@ contract NFTMarketplaceTest is Test {
 
         nft.approve(address(marketplace), TOKEN_ID);
 
-        marketplace.listNFT(
-            address(nft),
-            TOKEN_ID,
-            PRICE
-        );
+        marketplace.listNFT(address(nft), TOKEN_ID, PRICE);
 
         vm.stopPrank();
 
         vm.prank(buyer);
 
-        marketplace.buyNFT{value: PRICE}(
-            address(nft),
-            TOKEN_ID
-        );
+        marketplace.buyNFT{value: PRICE}(address(nft), TOKEN_ID);
 
         uint256 ownerBalanceBefore = address(this).balance;
 
         marketplace.withdrawFees();
 
-        assertEq(
-            address(this).balance,
-            ownerBalanceBefore + 0.025 ether
-        );
+        assertEq(address(this).balance, ownerBalanceBefore + 0.025 ether);
 
-        assertEq(
-            marketplace.feesAccrued(),
-            0
-        );
+        assertEq(marketplace.feesAccrued(), 0);
 
-        assertEq(
-            address(marketplace).balance,
-            0.975 ether
-        );
+        assertEq(address(marketplace).balance, 0.975 ether);
     }
 
     function testSellerCannotWithdrawProceedsTwice() public {
@@ -372,29 +314,20 @@ contract NFTMarketplaceTest is Test {
 
         nft.approve(address(marketplace), TOKEN_ID);
 
-        marketplace.listNFT(
-            address(nft),
-            TOKEN_ID,
-            PRICE
-        );
+        marketplace.listNFT(address(nft), TOKEN_ID, PRICE);
 
         vm.stopPrank();
 
         vm.prank(buyer);
 
-        marketplace.buyNFT{value: PRICE}(
-            address(nft),
-            TOKEN_ID
-        );
+        marketplace.buyNFT{value: PRICE}(address(nft), TOKEN_ID);
 
         vm.prank(seller);
         marketplace.withdrawProceeds();
 
         vm.prank(seller);
 
-        vm.expectRevert(
-            NFTMarketplace.NoProceeds.selector
-        );
+        vm.expectRevert(NFTMarketplace.NoProceeds.selector);
 
         marketplace.withdrawProceeds();
     }
@@ -402,16 +335,10 @@ contract NFTMarketplaceTest is Test {
     function testNonOwnerCannotWithdrawFees() public {
         vm.prank(buyer);
 
-        vm.expectRevert(
-            abi.encodeWithSignature(
-                "OwnableUnauthorizedAccount(address)",
-                buyer
-            )
-        );
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", buyer));
 
         marketplace.withdrawFees();
     }
-
 
     function testAccountingAfterMultipleSales() public {
         uint256 secondTokenId = 1;
@@ -425,70 +352,156 @@ contract NFTMarketplaceTest is Test {
 
         vm.startPrank(seller);
 
-        nft.approve(
-            address(marketplace),
-            TOKEN_ID
-        );
+        nft.approve(address(marketplace), TOKEN_ID);
 
-        nft.approve(
-            address(marketplace),
-            secondTokenId
-        );
+        nft.approve(address(marketplace), secondTokenId);
 
-        marketplace.listNFT(
-            address(nft),
-            TOKEN_ID,
-            PRICE
-        );
+        marketplace.listNFT(address(nft), TOKEN_ID, PRICE);
 
-        marketplace.listNFT(
-            address(nft),
-            secondTokenId,
-            secondPrice
-        );
+        marketplace.listNFT(address(nft), secondTokenId, secondPrice);
 
         vm.stopPrank();
 
         vm.prank(buyer);
 
-        marketplace.buyNFT{value: PRICE}(
-            address(nft),
-            TOKEN_ID
-        );
+        marketplace.buyNFT{value: PRICE}(address(nft), TOKEN_ID);
 
         vm.prank(secondBuyer);
 
-        marketplace.buyNFT{value: secondPrice}(
-            address(nft),
-            secondTokenId
-        );
+        marketplace.buyNFT{value: secondPrice}(address(nft), secondTokenId);
 
         uint256 expectedFees = 0.075 ether;
         uint256 expectedProceeds = 2.925 ether;
 
-        assertEq(
-            marketplace.proceeds(seller),
-            expectedProceeds
-        );
+        assertEq(marketplace.proceeds(seller), expectedProceeds);
 
-        assertEq(
-            marketplace.feesAccrued(),
-            expectedFees
-        );
+        assertEq(marketplace.feesAccrued(), expectedFees);
 
-        assertEq(
-            address(marketplace).balance,
-            3 ether
-        );
+        assertEq(address(marketplace).balance, 3 ether);
 
-        assertEq(
-            nft.ownerOf(TOKEN_ID),
-            buyer
-        );
+        assertEq(nft.ownerOf(TOKEN_ID), buyer);
 
-        assertEq(
-            nft.ownerOf(secondTokenId),
-            secondBuyer
-        );
+        assertEq(nft.ownerOf(secondTokenId), secondBuyer);
+    }
+
+    function testReentrantSellerCannotWithdrawTwice() public {
+        ReentrantSeller attacker = new ReentrantSeller(marketplace);
+
+        uint256 tokenId = 1;
+
+        nft.mint(address(attacker), tokenId);
+
+        vm.prank(address(attacker));
+        nft.approve(address(marketplace), tokenId);
+
+        vm.prank(address(attacker));
+        marketplace.listNFT(address(nft), tokenId, PRICE);
+
+        vm.prank(buyer);
+        marketplace.buyNFT{value: PRICE}(address(nft), tokenId);
+
+        attacker.withdraw();
+
+        assertTrue(attacker.attackAttempted());
+
+        assertFalse(attacker.reentrantCallSucceeded());
+
+        assertEq(marketplace.proceeds(address(attacker)), 0);
+
+        assertEq(address(attacker).balance, 0.975 ether);
+    }
+
+    function testPurchaseRevertsIfBuyerCannotReceiveNFT() public {
+        NonERC721Buyer badBuyer = new NonERC721Buyer(marketplace);
+
+        vm.deal(address(badBuyer), 10 ether);
+
+        vm.startPrank(seller);
+
+        nft.approve(address(marketplace), TOKEN_ID);
+
+        marketplace.listNFT(address(nft), TOKEN_ID, PRICE);
+
+        vm.stopPrank();
+
+        vm.expectRevert();
+
+        badBuyer.buy{value: PRICE}(address(nft), TOKEN_ID);
+
+        // Everything must have rolled back
+        assertEq(nft.ownerOf(TOKEN_ID), seller);
+
+        (,, bool active) = marketplace.listings(address(nft), TOKEN_ID);
+
+        assertTrue(active);
+
+        assertEq(marketplace.proceeds(seller), 0);
+
+        assertEq(marketplace.feesAccrued(), 0);
+    }
+
+    function testReentrantBuyerCannotBuyDuringNFTCallback() public {
+        ReentrantBuyer attacker = new ReentrantBuyer(marketplace);
+
+        uint256 secondTokenId = 1;
+
+        nft.mint(seller, secondTokenId);
+
+        vm.deal(address(attacker), 10 ether);
+
+        vm.startPrank(seller);
+
+        nft.approve(address(marketplace), TOKEN_ID);
+
+        nft.approve(address(marketplace), secondTokenId);
+
+        marketplace.listNFT(address(nft), TOKEN_ID, PRICE);
+
+        marketplace.listNFT(address(nft), secondTokenId, PRICE);
+
+        vm.stopPrank();
+
+        attacker.configureAttack(address(nft), secondTokenId, PRICE);
+
+        attacker.buy{value: PRICE}(address(nft), TOKEN_ID);
+
+        assertTrue(attacker.attackAttempted());
+
+        assertFalse(attacker.reentrantCallSucceeded());
+
+        // First purchase succeeds
+        assertEq(nft.ownerOf(TOKEN_ID), address(attacker));
+
+        // Reentrant second purchase fails
+        assertEq(nft.ownerOf(secondTokenId), seller);
+
+        (,, bool secondListingActive) = marketplace.listings(address(nft), secondTokenId);
+
+        assertTrue(secondListingActive);
+    }
+
+    function testWithdrawalFailurePreservesProceeds() public {
+        RejectingSeller rejectingSeller = new RejectingSeller(marketplace);
+
+        uint256 tokenId = 1;
+
+        nft.mint(address(rejectingSeller), tokenId);
+
+        vm.prank(address(rejectingSeller));
+        nft.approve(address(marketplace), tokenId);
+
+        vm.prank(address(rejectingSeller));
+        marketplace.listNFT(address(nft), tokenId, PRICE);
+
+        vm.prank(buyer);
+        marketplace.buyNFT{value: PRICE}(address(nft), tokenId);
+
+        assertEq(marketplace.proceeds(address(rejectingSeller)), 0.975 ether);
+
+        vm.expectRevert(NFTMarketplace.ETHTransferFailed.selector);
+
+        rejectingSeller.withdraw();
+
+        assertEq(marketplace.proceeds(address(rejectingSeller)), 0.975 ether);
     }
 }
