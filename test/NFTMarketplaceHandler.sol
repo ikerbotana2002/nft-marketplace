@@ -17,63 +17,38 @@ contract NFTMarketplaceHandler is Test {
 
     uint256 public nextTokenId;
 
-    constructor(
-        NFTMarketplace _marketplace,
-        MockNFT _nft
-    ) {
+    constructor(NFTMarketplace _marketplace, MockNFT _nft) {
         marketplace = _marketplace;
         nft = _nft;
 
         vm.deal(buyer, 1_000_000 ether);
     }
 
-    function createSale(
-        uint96 rawPrice,
-        bool useSellerA
-    ) external {
-        uint256 price = bound(
-            uint256(rawPrice),
-            1,
-            100 ether
-        );
+    function createSale(uint96 rawPrice, bool useSellerA) external {
+        uint256 price = bound(uint256(rawPrice), 1, 100 ether);
 
-        address seller =
-            useSellerA ? sellerA : sellerB;
+        address seller = useSellerA ? sellerA : sellerB;
 
         uint256 tokenId = nextTokenId;
         nextTokenId++;
 
-        nft.mint(
-            seller,
-            tokenId
-        );
+        nft.mint(seller, tokenId);
 
         vm.startPrank(seller);
 
-        nft.approve(
-            address(marketplace),
-            tokenId
-        );
+        nft.approve(address(marketplace), tokenId);
 
-        marketplace.listNFT(
-            address(nft),
-            tokenId,
-            price
-        );
+        marketplace.listNFT(address(nft), tokenId, price);
 
         vm.stopPrank();
 
         vm.prank(buyer);
 
-        marketplace.buyNFT{value: price}(
-            address(nft),
-            tokenId
-        );
+        marketplace.buyNFT{value: price}(address(nft), tokenId);
     }
 
     function withdrawSellerA() external {
-        uint256 amount =
-            marketplace.proceeds(sellerA);
+        uint256 amount = marketplace.proceeds(sellerA);
 
         if (amount == 0) return;
 
@@ -82,8 +57,7 @@ contract NFTMarketplaceHandler is Test {
     }
 
     function withdrawSellerB() external {
-        uint256 amount =
-            marketplace.proceeds(sellerB);
+        uint256 amount = marketplace.proceeds(sellerB);
 
         if (amount == 0) return;
 

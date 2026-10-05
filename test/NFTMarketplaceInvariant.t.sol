@@ -18,48 +18,24 @@ contract NFTMarketplaceInvariant is StdInvariant, Test {
         marketplace = new NFTMarketplace();
         nft = new MockNFT();
 
-        handler = new NFTMarketplaceHandler(
-            marketplace,
-            nft
-        );
+        handler = new NFTMarketplaceHandler(marketplace, nft);
 
         targetContract(address(handler));
     }
 
-    function invariant_ContractBalanceMatchesAccounting()
-        public
-        view
-    {
-        uint256 sellerProceeds =
-            marketplace.proceeds(handler.sellerA()) +
-            marketplace.proceeds(handler.sellerB());
+    function invariant_ContractBalanceMatchesAccounting() public view {
+        uint256 sellerProceeds = marketplace.proceeds(handler.sellerA()) + marketplace.proceeds(handler.sellerB());
 
-        uint256 totalLiabilities =
-            sellerProceeds +
-            marketplace.feesAccrued();
+        uint256 totalLiabilities = sellerProceeds + marketplace.feesAccrued();
 
-        assertEq(
-            address(marketplace).balance,
-            totalLiabilities
-        );
+        assertEq(address(marketplace).balance, totalLiabilities);
     }
 
-    function invariant_MarketplaceIsAlwaysSolvent()
-        public
-        view
-    {
-        uint256 sellerProceeds =
-            marketplace.proceeds(handler.sellerA()) +
-            marketplace.proceeds(handler.sellerB());
+    function invariant_MarketplaceIsAlwaysSolvent() public view {
+        uint256 sellerProceeds = marketplace.proceeds(handler.sellerA()) + marketplace.proceeds(handler.sellerB());
 
-        uint256 totalLiabilities =
-            sellerProceeds +
-            marketplace.feesAccrued();
+        uint256 totalLiabilities = sellerProceeds + marketplace.feesAccrued();
 
-        assertGe(
-            address(marketplace).balance,
-            totalLiabilities
-        );
+        assertGe(address(marketplace).balance, totalLiabilities);
     }
-    
 }
