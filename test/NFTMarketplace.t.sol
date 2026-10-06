@@ -8,6 +8,7 @@ import {MockNFT} from "./MockNFT.sol";
 import {NonERC721Buyer} from "./NonERC721Buyer.sol";
 import {ReentrantBuyer} from "./ReentrantBuyer.sol";
 import {RejectingSeller} from "./RejectingSeller.sol";
+import {RejectingOwner} from "./RejectingOwner.sol";
 
 contract NFTMarketplaceTest is Test {
     NFTMarketplace marketplace;
@@ -533,5 +534,178 @@ contract NFTMarketplaceTest is Test {
         assertEq(address(marketplace).balance, price);
 
         assertEq(marketplace.proceeds(seller) + marketplace.feesAccrued(), price);
+    }
+
+    function testSameTokenIdFromDifferentCollectionsAreIndependent() public {
+        MockNFT secondNFT = new MockNFT();
+
+        secondNFT.mint(seller, TOKEN_ID);
+
+        vm.startPrank(seller);
+
+        nft.approve(address(marketplace), TOKEN_ID);
+
+        secondNFT.approve(address(marketplace), TOKEN_ID);
+
+        marketplace.listNFT(address(nft), TOKEN_ID, 1 ether);
+
+        marketplace.listNFT(address(secondNFT), TOKEN_ID, 2 ether);
+
+        vm.stopPrank();
+
+        (address firstSeller, uint256 firstPrice, bool firstActive) = marketplace.listings(address(nft), TOKEN_ID);
+
+        (address secondSeller, uint256 secondPrice, bool secondActive) =
+            marketplace.listings(address(secondNFT), TOKEN_ID);
+
+        assertEq(firstSeller, seller);
+        assertEq(firstPrice, 1 ether);
+        assertTrue(firstActive);
+
+        assertEq(secondSeller, seller);
+        assertEq(secondPrice, 2 ether);
+        assertTrue(secondActive);
+    }
+
+    function testBuyerCanRelistPurchasedNFT() public {
+        // Seller lists NFT #0
+        vm.startPrank(seller);
+
+        nft.approve(address(marketplace), TOKEN_ID);
+
+        marketplace.listNFT(address(nft), TOKEN_ID, PRICE);
+
+        vm.stopPrank();
+
+        // Buyer purchases NFT #0
+        vm.prank(buyer);
+
+        marketplace.buyNFT{value: PRICE}(address(nft), TOKEN_ID);
+
+        assertEq(nft.ownerOf(TOKEN_ID), buyer);
+
+        // Buyer is now the owner, so they can approve
+        // the marketplace and list the same NFT again
+        uint256 newPrice = 2 ether;
+
+        vm.startPrank(buyer);
+
+        nft.approve(address(marketplace), TOKEN_ID);
+
+        marketplace.listNFT(address(nft), TOKEN_ID, newPrice);
+
+        vm.stopPrank();
+
+        (address listingSeller, uint256 listingPrice, bool active) = marketplace.listings(address(nft), TOKEN_ID);
+
+        assertEq(listingSeller, buyer);
+
+        assertEq(listingPrice, newPrice);
+
+        assertTrue(active);
+    }
+
+    function testPreviousSellerCannotModifyRelistedNFT() public {
+        // Alice lists NFT #0
+        vm.startPrank(seller);
+
+        nft.approve(address(marketplace), TOKEN_ID);
+
+        marketplace.listNFT(address(nft), TOKEN_ID, PRICE);
+
+        vm.stopPrank();
+
+        // Bob buys it
+        vm.prank(buyer);
+
+        marketplace.buyNFT{value: PRICE}(address(nft), TOKEN_ID);
+
+        // Bob relists it
+        vm.startPrank(buyer);
+
+        nft.approve(address(marketplace), TOKEN_ID);
+
+        marketplace.listNFT(address(nft), TOKEN_ID, 2 ether);
+
+        vm.stopPrank();
+
+        // Alice tries to cancel Bob's listing
+        vm.prank(seller);
+
+        vm.expectRevert(NFTMarketplace.NotListingSeller.selector);
+
+        marketplace.cancelListing(address(nft), TOKEN_ID);
+
+        // Alice tries to change Bob's price
+        vm.prank(seller);
+
+        vm.expectRevert(NFTMarketplace.NotListingSeller.selector);
+
+        marketplace.updateListingPrice(address(nft), TOKEN_ID, 3 ether);
+    }
+
+    function testCannotBuyUnlistedNFT() public {
+        vm.prank(buyer);
+
+        vm.expectRevert(NFTMarketplace.NFTNotListed.selector);
+
+        marketplace.buyNFT{value: PRICE}(address(nft), TOKEN_ID);
+    }
+
+    function testCannotCancelUnlistedNFT() public {
+        vm.prank(seller);
+
+        vm.expectRevert(NFTMarketplace.NFTNotListed.selector);
+
+        marketplace.cancelListing(address(nft), TOKEN_ID);
+    }
+
+    function testCannotUpdateUnlistedNFT() public {
+        vm.prank(seller);
+
+        vm.expectRevert(NFTMarketplace.NFTNotListed.selector);
+
+        marketplace.updateListingPrice(address(nft), TOKEN_ID, 2 ether);
+    }
+
+    function testOwnerCannotWithdrawFeesWhenNoneExist() public {
+        vm.expectRevert(NFTMarketplace.NoFees.selector);
+
+        marketplace.withdrawFees();
+    }
+
+    function testFeeWithdrawalFailurePreservesFees() public {
+        RejectingOwner rejectingOwner = new RejectingOwner();
+
+        // Generate marketplace fees with a normal sale
+        vm.startPrank(seller);
+
+        nft.approve(address(marketplace), TOKEN_ID);
+
+        marketplace.listNFT(address(nft), TOKEN_ID, PRICE);
+
+        vm.stopPrank();
+
+        vm.prank(buyer);
+
+        marketplace.buyNFT{value: PRICE}(address(nft), TOKEN_ID);
+
+        assertEq(marketplace.feesAccrued(), 0.025 ether);
+
+        // The test contract is currently the marketplace owner.
+        // Give ownership to the contract that refuses ETH.
+        marketplace.transferOwnership(address(rejectingOwner));
+
+        vm.expectRevert(NFTMarketplace.ETHTransferFailed.selector);
+
+        rejectingOwner.withdrawFees(marketplace);
+
+        // The withdrawal reverted, so feesAccrued
+        // must also have been restored.
+        assertEq(marketplace.feesAccrued(), 0.025 ether);
+
+        // Seller proceeds + fees are still physically
+        // inside the marketplace.
+        assertEq(address(marketplace).balance, 1 ether);
     }
 }
